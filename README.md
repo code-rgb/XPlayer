@@ -31,7 +31,7 @@
 
 Add this repo as **custom plugin repo** i.e
 `CUSTOM_PLUGINS_REPO="https://github.com/code-rgb/XPlayer"`
-or add [xplayer.py](https://github.com/code-rgb/XPlayer/blob/main/plugins/xplayer.py) in your custom plugin repo or forked X repo.
+or add [xplayer.py](https://github.com/code-rgb/XPlayer/blob/master/plugins/xplayer.py) in your custom plugin repo or forked X repo.
 
 #### ⚡️FAQ :
 
