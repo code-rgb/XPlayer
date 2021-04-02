@@ -520,7 +520,6 @@ if userge.has_bot:
 # <------------------------> COMMANDS <------------------------> #
 
 
-
 @userge.on_cmd(
     "joinvc",
     about={
