@@ -376,7 +376,7 @@ async def get_lyrics(search: str) -> Optional[str]:
 async def kill_radio(chat_id: int) -> None:
     if process := FFMPEG_PROCESSES.get(chat_id):
         process.send_signal(SIGTERM)
-    radioraw = keypath(f"radio-{chat_id}")
+    radioraw = keypath(f"radio_{chat_id}")
     if os.path.exists(radioraw):
         os.remove(radioraw)
 
