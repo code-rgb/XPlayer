@@ -867,6 +867,7 @@ async def search_lyrics(m: Message, gc: XPlayer):
 async def start_radio(m: Message, gc: XPlayer):
     """Play radio stations."""
     text = None
+    reply = m.reply_to_message
     if m.input_str:
         text = m.input_str
     elif reply and (reply.text or reply.caption):
