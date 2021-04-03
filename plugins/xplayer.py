@@ -29,12 +29,12 @@ from typing import Dict, List, Optional, Union
 import youtube_dl
 from pyrogram import filters
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
-from userge import Config, Message, pool, userge
+from userge import Config, Message, get_collection, pool, userge
+from userge.plugins.bot.alive import _parse_arg
 from userge.plugins.bot.utube_inline import BASE_YT_URL, get_yt_video_id, get_ytthumb
 from userge.plugins.misc.upload import check_thumb
-from userge.plugins.tools.system import restart_ as restart_system
 from userge.plugins.utils.songlink import find_url_from_msg, get_song_link
-from userge.utils import get_response, post_to_telegraph, time_formatter
+from userge.utils import escape_markdown, time_formatter
 from wget import download
 from youtube_dl.utils import DownloadError, ExtractorError, GeoRestrictedError
 from youtubesearchpython.__future__ import VideosSearch
@@ -50,61 +50,105 @@ except ModuleNotFoundError:
 from userge.utils import check_owner, rand_key, safe_filename
 
 LOG = userge.getLogger(__name__)
-STREAM_LINK = re.compile(r"https?://[\S]+\.(?:m3u8?|audio|[a-z]{1,4}:[0-9]+)")
+STREAM_LINK = re.compile(r"https?://[\S]+\.(?:m3u8?|audio|mp3|aac|[a-z]{1,4}:[0-9]+)")
 FFMPEG_PROCESSES = {}
+MAX_DURATION = int(os.environ.get("VC_SONG_MAX_DURATION", 600))
+LOG.debug(MAX_DURATION)
+SAVED_SETTINGS = get_collection("CONFIGS")
+
+
+async def _init() -> None:
+    if vc_g_m := await SAVED_SETTINGS.find_one({"_id": "VC_GROUP_MODE"}):
+        if not hasattr(Config, "VC_GROUP_MODE"):
+            setattr(Config, "VC_GROUP_MODE", False)
+        Config.VC_GROUP_MODE = vc_g_m["data"]
 
 
 class XPlayer(GroupCall):
     def __init__(self, chat_id: int):
         self.replay_songs = False
         self.current_vol = 100
-        self.is_active = False
         self.playlist = []
         self.chat_id = chat_id
+        self.chat_has_bot = False
         super().__init__(
             client=userge, play_on_repeat=self.replay_songs, path_to_log_file=""
         )
 
     def start_playout(self, key: str):
+        LOG.debug(f"{keypath(key)}  is now playing")
         self.input_filename = keypath(key)
 
     def replay(self) -> bool:
         self.play_on_repeat = self.replay_songs = not self.replay_songs
         return self.replay_songs
 
+    def get_playlist(self) -> str:
+        out = "🗒  **PLAYLIST**\n\n"
+        if len(self.playlist) == 0:
+            out += "`[ Empty ]`"
+        else:
+            current = self.playlist[0]
+            out += f"**Now Playing :  🎵 [{escape_markdown(current['title'])}]({current['msg'].link})**\n"
+            if len(self.playlist) > 1:
+                out += "\n".join(
+                    [
+                        f"• **{x}.** [{escape_markdown(y['title'])}]({y['msg'].link})"
+                        for x, y in enumerate(self.playlist[1:], start=1)
+                    ]
+                )
+        return out
+
     async def join(self):
-        await super().start(self.chat_id)
+        # Joining the same group call can crash the bot
+        if not self.is_connected:
+            await super().start(self.chat_id)
 
     async def leave(self):
         self.input_filename = ""
-        await super().stop()
+        # https://nekobin.com/nonaconeba.py
+        try:
+            await super().stop()
+        except AttributeError:
+            LOG.debug("No Group call found to leave")
 
 
 vc_chats: Dict[int, XPlayer] = {}
 
 
-def get_groupcall(chat_id: int) -> XPlayer:
-    if not (chat_id in vc_chats):
+async def get_groupcall(chat_id: int) -> XPlayer:
+    if not vc_chats.get(chat_id):
         group_call = vc_chats[chat_id] = XPlayer(chat_id)
         group_call.add_handler(
             network_status_changed_handler, GroupCallAction.NETWORK_STATUS_CHANGED
         )
         group_call.add_handler(playout_ended_handler, GroupCallAction.PLAYOUT_ENDED)
+        if userge.has_bot:
+            try:
+                await (await userge.get_chat(chat_id)).get_member(
+                    (await userge.bot.get_me()).id
+                )
+            except Exception:
+                pass
+                # LOG.info("Bot is not in the group")
+            else:
+                # LOG.info("Bot is in the group")
+                group_call.chat_has_bot = True
     return vc_chats[chat_id]
 
 
 async def network_status_changed_handler(gc: XPlayer, is_connected: bool) -> None:
     if is_connected:
-        gc.is_active = True
         LOG.info(f"JOINED VC in {gc.chat_id}")
     else:
-        gc.is_active = False
         LOG.info(f"LEFT VC in {gc.chat_id}")
 
 
 async def playout_ended_handler(gc, filename) -> None:
-    LOG.info("song ended")
+    LOG.debug("song ended")
     if len(gc.playlist) > 1:
+        LOG.debug(filename)
+        LOG.debug("play_now triggered")
         # deleting the raw file only when the next song has started
         to_del = keypath(gc.playlist.pop(0)["id"])
         await play_now(gc)
@@ -115,14 +159,10 @@ async def playout_ended_handler(gc, filename) -> None:
 def add_groupcall(func):
     @wraps(func)
     async def gc_from_chat(m: Message):
-        gc = get_groupcall(m.chat.id)
+        gc = await get_groupcall(m.chat.id)
         await func(m, gc)
 
     return gc_from_chat
-
-
-def emojize(enabled: bool) -> str:
-    return "✅  𝙴𝚗𝚊𝚋𝚕𝚎𝚍" if enabled else "❌  𝙳𝚒𝚜𝚊𝚋𝚕𝚎𝚍"
 
 
 def keypath(key: str, thumb: bool = False) -> Union[str, tuple]:
@@ -132,10 +172,12 @@ def keypath(key: str, thumb: bool = False) -> Union[str, tuple]:
 
 async def play_now(gc: XPlayer) -> None:
     r = gc.playlist[0]
+    LOG.debug(str(r))
     key = r["id"]
     client = userge.bot if r["has_bot"] else userge
     rawfile, thumb = keypath(key, thumb=True)
     if not os.path.exists(rawfile):
+        LOG.debug("No .raw file now downloading ...")
         if not (rawdata := await get_rawaudio_thumb(r)):
             await client.send_message(
                 gc.chat_id, f"Skipped 1 Invalid Track: `{r['title']}`"
@@ -145,13 +187,16 @@ async def play_now(gc: XPlayer) -> None:
             if len(gc.playlist) > 0:
                 await play_now(gc)
             return
+        LOG.debug(str(rawdata))
         rawfile, thumb = rawdata
-    gc.start_playout(rawfile)
+    gc.start_playout(key)
     if (msg_ := r["msg"]) and isinstance(msg_, Message):
         atitle = f"[{r['title']}]({msg_.link})"
     else:
         atitle = r["title"]
-    text = f'🎵 **{atitle}**\n🕐 Duration : `{time_formatter(r["duration"])}`\n__Requested by__ :  👤 {r["by_user"]}'
+    text = f'🎵 **{atitle}**\n🕐 Duration : `{time_formatter(r["duration"])}`'
+    if r["by_user"]:
+        text += f'\n__Requested by__ :  👤 {r["by_user"]}'
     if thumb and os.path.exists(thumb):
         await client.send_photo(gc.chat_id, photo=thumb, caption=text)
         os.remove(thumb)
@@ -193,19 +238,24 @@ async def yt_x_bleck_megik(link: str) -> Optional[str]:
 
 
 @pool.run_in_thread
-def convert_raw(audio_path: str, key: str = None) -> str:
+def convert_raw(audio_path: str, key: str = None) -> Optional[str]:
     filename = key or rand_key()
     raw_audio = keypath(filename)
-    ffmpeg.input(audio_path).output(
-        raw_audio, format="s16le", acodec="pcm_s16le", ac=2, ar="48k"
-    ).overwrite_output().run()
-    os.remove(audio_path)
-    return filename
+    try:
+        ffmpeg.input(audio_path).output(
+            raw_audio, format="s16le", acodec="pcm_s16le", ac=2, ar="48k"
+        ).overwrite_output().run()
+    except ffmpeg._run.Error:
+        LOG.error("FFMPEG Error while converting to .raw")
+    else:
+        os.remove(audio_path)
+        return filename
 
 
 def check_audio(duration: int, audio_key: str, playlist: List) -> Optional[str]:
     # Duration
-    if (invalid := (duration > 600 or duration == 0)) :
+    LOG.debug(duration)
+    if (invalid := (duration > MAX_DURATION or duration == 0)) :
         return f"Song Duration is {'invalid' if duration == 0 else 'too long'}"
     # check if already in Playlist
     if playlist and (audio_key in [x["id"] for x in playlist]):
@@ -214,7 +264,7 @@ def check_audio(duration: int, audio_key: str, playlist: List) -> Optional[str]:
 
 @pool.run_in_thread
 def extract_thumb(audio: str, key: str) -> Optional[str]:
-    thumb_path = os.path.join(Config.DOWN_PATH, f"{key}.jpg")
+    thumb_path = keypath(key, thumb=True)[1]
     try:
         (ffmpeg.input(audio).output(thumb_path).run())
     except ffmpeg._run.Error:
@@ -288,7 +338,7 @@ def voice_chat_helpers_buttons():
             InlineKeyboardButton("🎚  Volume", callback_data="vcbtn_vol"),
         ],
         [
-            InlineKeyboardButton("🐞  Debug  (restart)", callback_data="vcbtn_debug"),
+            InlineKeyboardButton("🐞  Debug", callback_data="vcbtn_debug"),
             InlineKeyboardButton("✖️  Close", callback_data="vcbtn_delete"),
         ],
     ]
@@ -353,19 +403,20 @@ def get_progress_string(current: int, total: int = 200) -> str:
     )
 
 
-async def get_lyrics(search: str) -> Optional[str]:
-    async with get_response.get_session() as session:
-        async with session.post(
-            "http://www.glyrics.xyz/search",
-            json={"searchTerm": search},
-            headers={"content-type": "application/json"},
-        ) as resp:
-            if not resp.status == 200:
-                return
-            result = await resp.json()
-    if lyrics := result.get("lyrics"):
-        nl = "\n"
-        return post_to_telegraph(search, f'<pre>{lyrics.replace(nl, "<br>")}</pre>')
+# async def get_lyrics(search: str) -> Optional[str]:
+#     async with get_response.get_session() as session:
+#         async with session.post(
+#             "http://www.glyrics.xyz/search",
+#             json={"searchTerm": search},
+#             headers={"content-type": "application/json"},
+#         ) as resp:
+#             if not resp.status == 200:
+#                 return
+#             result = await resp.json()
+#     if lyrics := result.get("lyrics"):
+#         nl = "\n"
+# return post_to_telegraph(search, f'<pre>{lyrics.replace(nl,
+# "<br>")}</pre>')
 
 
 async def kill_radio(chat_id: int) -> None:
@@ -383,17 +434,25 @@ if userge.has_bot:
     async def manage_vc_settings(c_q: CallbackQuery):
         await c_q.answer()
         setting = c_q.matches[0].group(1)
-        gc = get_groupcall(c_q.message.chat.id)
+        chat_id = c_q.message.chat.id
+        gc = await get_groupcall(chat_id)
         if setting == "back":
             text, buttons = voice_chat_helpers_buttons()
         else:
             if setting == "delete":
                 return await c_q.message.delete()
             if setting == "debug":
-                debug_msg = await userge.send_message(
-                    Config.LOG_CHANNEL_ID, "**#VC_Debug**\nrestarting system ..."
-                )
-                return await restart_system(debug_msg)
+                gc.input_filename = ""
+                await gc.leave()
+                gc = await get_groupcall(chat_id)
+                if len(gc.playlist) != 0:
+                    f_path = keypath(gc.playlist[0]["id"])
+                    try:
+                        os.remove(f_path)
+                    except OSError:
+                        pass
+                    await play_now(gc)
+                return await gc.join()
             if setting == "player":
                 text, buttons = control_pannel()
             elif setting == "vol":
@@ -414,7 +473,7 @@ if userge.has_bot:
         answer = ""
         alert = False
         to_edit = False
-        gc = get_groupcall(c_q.message.chat.id)
+        gc = await get_groupcall(c_q.message.chat.id)
         toggle_type = c_q.matches[0].group(1)
         to_change = c_q.matches[0].group(2)
         cb_text = to_change.title()
@@ -429,22 +488,12 @@ if userge.has_bot:
             #     gc.restart_recording()
         elif toggle_type == "plyr":
             if to_change == "playlist":
-                to_edit = True
-                text = "🗒  **Music Playlist**\n\n"
-                if len(gc.playlist) != 0:
-                    text += "\n".join(
-                        [
-                            f"• **{x}.** [{y['title']}]({y['msg'].link})"
-                            for x, y in enumerate(gc.playlist, start=1)
-                        ]
-                    )
-                else:
-                    text += "`[ Empty ]`"
                 buttons = [[InlineKeyboardButton("Back", callback_data="vcbtn_player")]]
                 return await c_q.message.edit(
-                    text, reply_markup=InlineKeyboardMarkup(buttons)
+                    gc.get_playlist(),
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                    disable_web_page_preview=True,
                 )
-
             if to_change == "pause":
                 gc.pause_playout()
                 answer = f"⏸  {cb_text}d Voice Chat"
@@ -460,7 +509,7 @@ if userge.has_bot:
                 answer = f"⏹  {cb_text}ped Voice chat."
                 await gc.leave()
             elif to_change == "repeat":
-                answer = f"🔁  {cb_text} :  {emojize(gc.replay())}"
+                answer = f"🔁  {cb_text} :  {_parse_arg(gc.replay())}"
             elif to_change == "skip":
                 if len(gc.playlist) <= 1:
                     answer = "Nothing Found to Skip, add songs in queue first !"
@@ -511,7 +560,11 @@ if userge.has_bot:
                 buttons += back_btn
             else:
                 buttons = back_btn
-            await c_q.message.edit(text, reply_markup=InlineKeyboardMarkup(buttons))
+            await c_q.message.edit(
+                text,
+                reply_markup=InlineKeyboardMarkup(buttons),
+                disable_web_page_preview=True,
+            )
 
 
 # <------------------------> COMMANDS <------------------------> #
@@ -528,11 +581,13 @@ if userge.has_bot:
 async def join_voice_chat(m: Message, gc: XPlayer):
     """Join the voice chat."""
     try:
-        await gc.join()
+        if gc.is_connected:
+            await m.edit("Already in Voice Chat !", del_in=5)
+        else:
+            await gc.join()
+            await m.edit("**Joined** Voice Chat Successfully.", del_in=3)
     except RuntimeError:
         await m.err("No Voice Chat Found, start one first !")
-    else:
-        await m.edit("**Joined** Voice Chat Successfully.", del_in=3)
 
 
 @userge.on_cmd(
@@ -570,10 +625,13 @@ async def skip_song_voice_chat(m: Message, gc: XPlayer):
     "playvc",
     about={
         "header": "Play song in voice chats",
-        "description": "Play Songs in VC by audio file / media group or song name or song URL\n(supports spotify, youtube, deezer links etc.)",
+        "description": "Play Songs in VC by audio file / media group or song name or song URL"
+        "\n(supports spotify, youtube, deezer links etc.)",
         "usage": "{tr}playvc [reply to audio msg / Media group | song name | URL]",
         "examples": "{tr}playvc Beliver OR {tr}playvc [reply to audio file]",
     },
+    filter_me=Config.VC_GROUP_MODE,
+    check_client=True,
 )
 @add_groupcall
 async def play_voice_chat(m: Message, gc: XPlayer):
@@ -592,7 +650,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
                     if title := msg.audio.performer:
                         title += f" - {msg.audio.title}"
                     else:
-                        title = msg.audio.title or ""
+                        title = msg.audio.title or msg.audio.file_name
                     audio_list.append(
                         append_playlist(
                             gc,
@@ -623,7 +681,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
         if title := reply.audio.performer:
             title += f" - {reply.audio.title}"
         else:
-            title = reply.audio.title or ""
+            title = reply.audio.title or msg.audio.file_name
         thumb = ""
         if err_msg := check_audio(duration, audio_key, playlist):
             return await m.err(err_msg, del_in=7)
@@ -641,13 +699,11 @@ async def play_voice_chat(m: Message, gc: XPlayer):
                 search_q = reply.text or reply.caption
                 audio_msg = reply
             else:
-                LOG.debug("No Input Found")
-                return
+                return await m.err("No Input Found", del_in=5)
             videosSearch = VideosSearch(search_q.strip(), limit=1)
             videosResult = await videosSearch.next()
             if len(res := videosResult["result"]) == 0:
-                LOG.debug(f'No Result found for Query:  "{search_q}"')
-                return
+                return await m.err(f'No Result found for Query:  "{search_q}"')
             yt_id = res[0]["id"]
         if not (vid_info := await get_ytvid_info(yt_id)):
             LOG.debug("Something Went Wrong :P")
@@ -683,9 +739,9 @@ async def append_playlist(gc: XPlayer, m: Message, media_grp: bool, **kwargs) ->
             "has_bot": m.client.is_bot,
             "msg": kwargs["audio_msg"],
             "yt_url": kwargs["yt_id"],
-            "by_user": (
-                await userge.get_user_dict(m.from_user, attr_dict=True)
-            ).mention,
+            "by_user": (await userge.get_user_dict(m.from_user, attr_dict=True)).mention
+            if m.from_user
+            else None,
         }
     )
 
@@ -703,6 +759,7 @@ async def append_playlist(gc: XPlayer, m: Message, media_grp: bool, **kwargs) ->
         "header": "Leave the fun.",
         "description": "Leave voice chat in current group.",
         "usage": "{tr}stopvc just use it.",
+        "flags": {"-all": "stop all active voice chats"},
         "examples": "{tr}stopvc",
     },
 )
@@ -716,7 +773,7 @@ async def stop_voice_chat(m: Message, gc: XPlayer):
         if chat_ids:
             kill_list += [kill_radio(rid) for rid in chat_ids]
         if vc_chats:
-            kill_list += [i.leave() for i in vc_chats.values() if i.is_active]
+            kill_list += [i.leave() for i in vc_chats.values()]  # if i.is_connected
         if kill_list:
             await asyncio.gather(*kill_list)
     else:
@@ -738,7 +795,7 @@ async def stop_voice_chat(m: Message, gc: XPlayer):
 @add_groupcall
 async def pause_voice_chat(m: Message, gc: XPlayer):
     """Pause songs."""
-    await m.edit("__Pausing Media__ ...", del_in=5)
+    await m.edit("⏸  __Pausing Media__ ...", del_in=5)
     gc.pause_playout()
 
 
@@ -754,7 +811,7 @@ async def pause_voice_chat(m: Message, gc: XPlayer):
 @add_groupcall
 async def resume_voice_chat(m: Message, gc: XPlayer):
     """Resume songs."""
-    await m.edit("__resuming Media__ ...", del_in=5)
+    await m.edit("▶️  __Resuming Media__ ...", del_in=5)
     gc.resume_playout()
 
 
@@ -770,7 +827,7 @@ async def resume_voice_chat(m: Message, gc: XPlayer):
 @add_groupcall
 async def mute_voice_chat(m: Message, gc: XPlayer):
     """Shhhh..."""
-    await m.edit("__Muting VC__ ...", del_in=5)
+    await m.edit("🔇  __Muting Self__ ...", del_in=5)
     gc.set_is_mute(True)
 
 
@@ -786,7 +843,7 @@ async def mute_voice_chat(m: Message, gc: XPlayer):
 @add_groupcall
 async def unmute_voice_chat(m: Message, gc: XPlayer):
     """Unmute voice chat."""
-    await m.edit("__UnMuting VC__ ...", del_in=5)
+    await m.edit("🔈  __UnMuting Self__ ...", del_in=5)
     gc.set_is_mute(False)
 
 
@@ -818,37 +875,48 @@ async def change_vol(m: Message, gc: XPlayer):
         "examples": "{tr}managevc",
     },
 )
-async def manage_voice_chat(m: Message):
+@add_groupcall
+async def manage_voice_chat(m: Message, gc: XPlayer):
     """Manage your voice chats."""
-    if not m.client.is_bot:
+    if not (m.client.is_bot or gc.chat_has_bot):
         return await m.err(
             "Bot Needed !, if bot is present in the group then try again with SUDO_TRIGGER."
         )
     out = voice_chat_helpers_buttons()
-    await m.reply(out[0], reply_markup=InlineKeyboardMarkup(out[1]))
-
-
-@userge.on_cmd(
-    "lyricvc",
-    about={
-        "header": "Do you find your songs hard to understand ?",
-        "description": "Get lyrics of current playing songs.",
-        "usage": "Use {tr}lyricvc and get lyrics !",
-        "examples": "{tr}lyricvc",
-    },
-)
-@add_groupcall
-async def search_lyrics(m: Message, gc: XPlayer):
-    """Get lyrics for current playing songs."""
-    if len(gc.playlist) == 0:
-        await m.edit("No Song is Playing in voice chat")
+    if m.client.is_bot:
+        await m.edit(out[0], reply_markup=InlineKeyboardMarkup(out[1]))
     else:
-        song = gc.playlist[0]["title"]
-        await m.edit(f"Finding Lyrics for - 🎵 `{song}`")
-        if lyrics_url := await get_lyrics(song):
-            await m.edit(f"🎵  **[{song}]({lyrics_url})**")
-        else:
-            await m.edit("No result found !", del_in=5)
+        await asyncio.gather(
+            m.delete(),
+            userge.bot.send_message(
+                m.chat.id,
+                out[0],
+                reply_markup=InlineKeyboardMarkup(out[1]),
+            ),
+        )
+
+
+# @userge.on_cmd(
+#     "lyricvc",
+#     about={
+#         "header": "Do you find your songs hard to understand ?",
+#         "description": "Get lyrics of current playing songs.",
+#         "usage": "Use {tr}lyricvc and get lyrics !",
+#         "examples": "{tr}lyricvc",
+#     },
+# )
+# @add_groupcall
+# async def search_lyrics(m: Message, gc: XPlayer):
+#     """Get lyrics for current playing songs."""
+#     if len(gc.playlist) == 0:
+#         await m.edit("No Song is Playing in voice chat")
+#     else:
+#         song = gc.playlist[0]["title"]
+#         await m.edit(f"Finding Lyrics for - 🎵 `{song}`")
+#         if lyrics_url := await get_lyrics(song):
+#             await m.edit(f"🎵  **[{song}]({lyrics_url})**")
+#         else:
+#             await m.edit("No result found !", del_in=5)
 
 
 @userge.on_cmd(
@@ -880,7 +948,6 @@ async def start_radio(m: Message, gc: XPlayer):
     station_stream_url = match.group(0)
     LOG.info(station_stream_url)
     LOG.info(f"radio_{m.chat.id}")
-    gc.start_playout(f"radio_{m.chat.id}")
     process = (
         ffmpeg.input(station_stream_url)
         .output(radioraw, format="s16le", acodec="pcm_s16le", ac=2, ar="48k")
@@ -889,6 +956,7 @@ async def start_radio(m: Message, gc: XPlayer):
     )
     FFMPEG_PROCESSES[m.chat.id] = process
     await m.edit(f"📻 Radio : `{station_stream_url}` is playing...")
+    gc.start_playout(f"radio_{m.chat.id}")
 
 
 @userge.on_cmd(
@@ -899,16 +967,39 @@ async def start_radio(m: Message, gc: XPlayer):
     },
 )
 @add_groupcall
-async def playlist(m: Message, gc: XPlayer):
+async def playlist_voice_chat(m: Message, gc: XPlayer):
     """Song Playlist"""
-    text = "🗒  **Music Playlist**\n\n"
-    if len(gc.playlist) != 0:
-        text += "\n".join(
-            [
-                f"• **{x}.** [{y['title']}]({y['msg'].link})"
-                for x, y in enumerate(gc.playlist, start=1)
-            ]
+    await m.edit_or_send_as_file(gc.get_playlist(), disable_web_page_preview=True)
+
+
+@userge.on_cmd(
+    "vcgroupmode",
+    about={"header": "Allow group members to use playvc command without sudo"},
+    allow_channels=False,
+)
+async def groupmode_voice_chat(message: Message):
+    """ enable / disable playvc for group members """
+    if Config.VC_GROUP_MODE:
+        await message.edit(
+            "❌  `playvc disabled for everyone (only owner and sudo users can use)`",
+            del_in=3,
         )
     else:
-        text += "`[ Empty ]`"
-    await m.edit(text, disable_web_page_preview=True)
+        await message.edit("✅  `playvc enabled for everyone`", del_in=3)
+    Config.VC_GROUP_MODE = not Config.VC_GROUP_MODE
+    await SAVED_SETTINGS.update_one(
+        {"_id": "VC_GROUP_MODE"}, {"$set": {"data": Config.VC_GROUP_MODE}}, upsert=True
+    )
+
+
+@userge.on_cmd(
+    "repeatvc",
+    about={
+        "header": "Repeat song",
+        "description": "turn on repeat for the last song in queue",
+    },
+)
+@add_groupcall
+async def replay_voice_chat(m: Message, gc: XPlayer):
+    """repeat voice chat media"""
+    await m.edit(f"🔁  Repeat :  {_parse_arg(gc.replay())}", del_in=5)
