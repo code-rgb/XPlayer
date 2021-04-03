@@ -104,11 +104,12 @@ async def network_status_changed_handler(gc: XPlayer, is_connected: bool) -> Non
 
 async def playout_ended_handler(gc, filename) -> None:
     LOG.info("song ended")
-    if len(gc.playlist) == 0:
-        return
-    pop_and_del(gc)
-    if len(gc.playlist) > 0:
+    if len(gc.playlist) > 1:
+        # deleting the raw file only when the next song has started
+        to_del = keypath(gc.playlist.pop(0)["id"])
         await play_now(gc)
+        if os.path.exists(to_del):
+            os.remove(to_del)
 
 
 def add_groupcall(func):
@@ -139,8 +140,8 @@ async def play_now(gc: XPlayer) -> None:
             await client.send_message(
                 gc.chat_id, f"Skipped 1 Invalid Track: `{r['title']}`"
             )
-            LOG.debug("Skipped Invalid Track")
-            pop_and_del(gc)
+            LOG.info("Skipped Invalid Track")
+            gc.playlist.pop(0)
             if len(gc.playlist) > 0:
                 await play_now(gc)
             return
@@ -189,12 +190,6 @@ async def yt_x_bleck_megik(link: str) -> Optional[str]:
             return
         yt_id = get_yt_video_id(yt_.get("url"))
     return yt_id
-
-
-def pop_and_del(gc: XPlayer) -> None:
-    to_del = keypath(gc.playlist.pop(0)["id"])
-    if os.path.exists(to_del):
-        os.remove(to_del)
 
 
 @pool.run_in_thread
@@ -471,8 +466,10 @@ if userge.has_bot:
                     answer = "Nothing Found to Skip, add songs in queue first !"
                     alert = True
                 else:
-                    pop_and_del(gc)
+                    to_del = keypath(gc.playlist.pop(0)["id"])
                     await asyncio.gather(c_q.answer("⏭  Song Skipped"), play_now(gc))
+                    if os.path.exists(to_del):
+                        os.remove(to_del)
                     return
             elif to_change == "clearall":
                 gc.playlist.clear()
@@ -914,4 +911,4 @@ async def playlist(m: Message, gc: XPlayer):
         )
     else:
         text += "`[ Empty ]`"
-    await m.edit(text)
+    await m.edit(text, disable_web_page_preview=True)
