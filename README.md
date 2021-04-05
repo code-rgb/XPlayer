@@ -30,7 +30,7 @@
 
 #### Requirements
 
-- [USERGE-X](https://github.com/code-rgb/USERGE-X) `v0.5.1` or above.
+- [USERGE-X](https://github.com/code-rgb/USERGE-X) `v0.5.2` or above.
 
 #### ⚙️ Config Vars
 
