@@ -56,7 +56,7 @@ STREAM_LINK = re.compile(r"https?://[\S]+\.(?:m3u8?|audio|mp3|aac|[a-z]{1,4}:[0-
 FFMPEG_PROCESSES = {}
 MAX_DURATION = int(os.environ.get("VC_SONG_MAX_DURATION", 600))
 SAVED_SETTINGS = get_collection("CONFIGS")
-VC_GROUP_MODE_CHATS: Set[int] = {}
+VC_GROUP_MODE_CHATS: Set[int] = set()
 
 
 async def _init() -> None:
