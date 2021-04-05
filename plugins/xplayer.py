@@ -1004,7 +1004,7 @@ async def playlist_voice_chat(m: Message, gc: XPlayer):
 @userge.on_cmd(
     "vcgroupmode",
     about={
-        "header": "Allow all group members to use playvc even without adding then in sudo",
+        "header": "Allow group members to play music without adding them as sudo users.",
         "flags": {"-d": "disable for all chats"},
     },
     allow_channels=False,
@@ -1012,8 +1012,9 @@ async def playlist_voice_chat(m: Message, gc: XPlayer):
     allow_bots=False,
 )
 async def groupmode_voice_chat(m: Message):
+    """Allow group members to use without adding user as sudo."""
     global VC_GROUP_MODE_CHATS
-    """ enable / disable playvc for group members """
+
     chat_id = m.chat.id
     if "-d" in m.flags:
         out = f"playvc **disabled** for `All Chats` (**{len(VC_GROUP_MODE_CHATS)}**)"
