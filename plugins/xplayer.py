@@ -37,7 +37,13 @@ from userge.plugins.bot.alive import _parse_arg
 from userge.plugins.bot.utube_inline import BASE_YT_URL, get_yt_video_id, get_ytthumb
 from userge.plugins.misc.upload import check_thumb
 from userge.plugins.utils.songlink import find_url_from_msg, get_song_link
-from userge.utils import escape_markdown, time_formatter, check_owner, rand_key, safe_filename
+from userge.utils import (
+    check_owner,
+    escape_markdown,
+    rand_key,
+    safe_filename,
+    time_formatter,
+)
 from wget import download
 from youtube_dl.utils import DownloadError, ExtractorError, GeoRestrictedError
 from youtubesearchpython.__future__ import VideosSearch
@@ -49,7 +55,6 @@ except ModuleNotFoundError:
     os.system("pip3 install -U pytgcalls ffmpeg-python")
     import ffmpeg
     from pytgcalls import GroupCall, GroupCallAction
-
 
 
 LOG = userge.getLogger(__name__)
