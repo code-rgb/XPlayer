@@ -40,6 +40,7 @@ from userge.utils import escape_markdown, time_formatter
 from wget import download
 from youtube_dl.utils import DownloadError, ExtractorError, GeoRestrictedError
 from youtubesearchpython.__future__ import VideosSearch
+from pyrogram.errors import UserNotParticipant
 
 try:
     import ffmpeg
@@ -125,10 +126,8 @@ async def get_groupcall(chat_id: int) -> XPlayer:
         group_call.add_handler(playout_ended_handler, GroupCallAction.PLAYOUT_ENDED)
         if userge.has_bot:
             try:
-                await (await userge.get_chat(chat_id)).get_member(
-                    (await userge.bot.get_me()).id
-                )
-            except Exception:
+                await userge.get_chat_member(chat_id, (await userge.bot.get_me()).id)
+            except UserNotParticipant:
                 pass
             else:
                 group_call.chat_has_bot = True
