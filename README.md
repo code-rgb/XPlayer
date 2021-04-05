@@ -32,10 +32,10 @@
 
 - [USERGE-X](https://github.com/code-rgb/USERGE-X) `v0.5.2` or above.
 
-#### ⚙️ Config Vars
+#### ⚙️ Config
 
 - `VC_SONG_MAX_DURATION` - Set the max. allowed song duration in sec. (defaults to `600`)
-- `VC_GROUP_MODE` - [use `.vcgroupmode` to enable / disable], If `True` anyone in the group can use `.playvc` to play songs. (defaults to `False`)
+- `.vcgroupmode` , If `Enabled` anyone in the group can use `.playvc` to play songs. (defaults to `Disabled`)
 
 Add this repo as **custom plugin repo** i.e
 `CUSTOM_PLUGINS_REPO="https://github.com/code-rgb/XPlayer"`
