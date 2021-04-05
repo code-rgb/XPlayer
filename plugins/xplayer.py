@@ -603,7 +603,7 @@ async def join_voice_chat(m: Message, gc: XPlayer):
 @add_groupcall
 async def skip_song_voice_chat(m: Message, gc: XPlayer):
     """Skip Current playing song."""
-    if not gc.playlist:
+    if len(gc.playlist) == 0:
         await m.edit("No Songs to Skip", del_in=5)
         return
     sk_e = "Provide a valid number of songs to skip"
@@ -617,7 +617,8 @@ async def skip_song_voice_chat(m: Message, gc: XPlayer):
     if 0 < num <= len(gc.playlist):
         gc.playlist = gc.playlist[num:]
         await m.edit(f"Skipped **{num}** songs.")
-        await play_now(gc)
+        if len(gc.playlist) > 0:
+            await play_now(gc)
     else:
         await m.err(sk_e, del_in=5)
 
