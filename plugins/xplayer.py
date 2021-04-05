@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Set, Union
 
 import youtube_dl
 from pyrogram import filters
+from pyrogram.errors import UserNotParticipant
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from userge import Config, Message, get_collection, pool, userge
 from userge.plugins.bot.alive import _parse_arg
@@ -40,7 +41,6 @@ from userge.utils import escape_markdown, time_formatter
 from wget import download
 from youtube_dl.utils import DownloadError, ExtractorError, GeoRestrictedError
 from youtubesearchpython.__future__ import VideosSearch
-from pyrogram.errors import UserNotParticipant
 
 try:
     import ffmpeg
