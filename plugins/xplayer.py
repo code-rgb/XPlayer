@@ -37,7 +37,7 @@ from userge.plugins.bot.alive import _parse_arg
 from userge.plugins.bot.utube_inline import BASE_YT_URL, get_yt_video_id, get_ytthumb
 from userge.plugins.misc.upload import check_thumb
 from userge.plugins.utils.songlink import find_url_from_msg, get_song_link
-from userge.utils import escape_markdown, time_formatter
+from userge.utils import escape_markdown, time_formatter, check_owner, rand_key, safe_filename
 from wget import download
 from youtube_dl.utils import DownloadError, ExtractorError, GeoRestrictedError
 from youtubesearchpython.__future__ import VideosSearch
@@ -50,13 +50,13 @@ except ModuleNotFoundError:
     import ffmpeg
     from pytgcalls import GroupCall, GroupCallAction
 
-from userge.utils import check_owner, rand_key, safe_filename
+
 
 LOG = userge.getLogger(__name__)
+SAVED_SETTINGS = get_collection("CONFIGS")
 STREAM_LINK = re.compile(r"https?://[\S]+\.(?:m3u8?|audio|mp3|aac|[a-z]{1,4}:[0-9]+)")
 FFMPEG_PROCESSES = {}
 MAX_DURATION = int(os.environ.get("VC_SONG_MAX_DURATION", 600))
-SAVED_SETTINGS = get_collection("CONFIGS")
 VC_GROUP_MODE_CHATS: Set[int] = set()
 
 
