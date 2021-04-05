@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Set, Union
 
 import youtube_dl
 from pyrogram import filters
-from pyrogram.errors import UserNotParticipant, PeerIdInvalid
+from pyrogram.errors import PeerIdInvalid, UserNotParticipant
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from userge import Config, Message, get_collection, pool, userge
 from userge.plugins.bot.alive import _parse_arg
@@ -74,6 +74,7 @@ async def _init() -> None:
 class XPlayer(GroupCall):
     def __init__(self, chat_id: int):
         self.replay_songs = False
+        self.is_active = False
         self.current_vol = 100
         self.playlist = []
         self.chat_id = chat_id
@@ -107,14 +108,17 @@ class XPlayer(GroupCall):
 
     async def join(self):
         # Joining the same group call can crash the bot
-        if not self.is_connected:
+        # if not self.is_connected: (https://t.me/tgcallschat/7563)
+        if not self.is_active:
             await super().start(self.chat_id)
+            self.is_active = True
 
     async def leave(self):
         self.input_filename = ""
         # https://nekobin.com/nonaconeba.py
         try:
             await super().stop()
+            self.is_active = False
         except AttributeError:
             pass
 
@@ -131,7 +135,9 @@ async def get_groupcall(chat_id: int) -> XPlayer:
         group_call.add_handler(playout_ended_handler, GroupCallAction.PLAYOUT_ENDED)
         if userge.has_bot:
             try:
-                await userge.get_chat_member(chat_id, (await userge.bot.get_me()).username)
+                await userge.get_chat_member(
+                    chat_id, (await userge.bot.get_me()).username
+                )
             except (UserNotParticipant, PeerIdInvalid):
                 pass
             else:
@@ -141,8 +147,10 @@ async def get_groupcall(chat_id: int) -> XPlayer:
 
 async def network_status_changed_handler(gc: XPlayer, is_connected: bool) -> None:
     if is_connected:
+        gc.is_active = True
         LOG.info(f"JOINED VC in {gc.chat_id}")
     else:
+        gc.is_active = False
         LOG.info(f"LEFT VC in {gc.chat_id}")
 
 
@@ -156,11 +164,10 @@ async def playout_ended_handler(gc, filename) -> None:
         await play_now(gc)
         if os.path.exists(to_del):
             os.remove(to_del)
-        return 
+        return
     if not gc.replay_songs:
         if os.path.exists(to_del):
             os.remove(to_del)
-
 
 
 def add_groupcall(func):
@@ -252,8 +259,8 @@ def convert_raw(audio_path: str, key: str = None) -> Optional[str]:
         ffmpeg.input(audio_path).output(
             raw_audio, format="s16le", acodec="pcm_s16le", ac=2, ar="48k"
         ).overwrite_output().run()
-    except ffmpeg._run.Error:
-        LOG.error("FFMPEG Error while converting to .raw")
+    except ffmpeg._run.Error as ff_e:
+        LOG.info(f"ERROR: FFMPEG coudn't transcode rawfile due to :  {ff_e}")
     else:
         os.remove(audio_path)
         return filename
@@ -286,9 +293,9 @@ def get_ytvid_info(yt_id: str) -> Optional[Dict]:
             BASE_YT_URL + yt_id, download=False
         )
     except ExtractorError:
-        LOG.error("Can't Extract Info from URL")
+        LOG.info("Can't Extract Info from URL")
     except Exception as err:
-        LOG.error(err)
+        LOG.info(err)
     else:
         return {
             "title": vid_data.get("title"),
@@ -321,15 +328,15 @@ def download_yt_song(yt_id: str) -> Optional[str]:
         with youtube_dl.YoutubeDL(opts) as ytdl:
             status = ytdl.download([BASE_YT_URL + yt_id])
     except DownloadError as dl_err:
-        LOG.error(f"Failed to download video due to ->  {dl_err}")
+        LOG.info(f"Failed to download video due to ->  {dl_err}")
     except GeoRestrictedError:
-        LOG.error("Youtube Video is Geo. Restricted")
+        LOG.info("Youtube Video is Geo. Restricted")
     except Exception as y_e:
-        LOG.error(y_e)
+        LOG.info(y_e)
     else:
         if status == 0:
             return audio_path
-        LOG.error(status)
+        LOG.info(status)
 
 
 def voice_chat_helpers_buttons():
@@ -482,7 +489,6 @@ if userge.has_bot:
                 return await c_q.message.delete()
             if setting == "debug":
                 await c_q.answer("Debugging ...")
-                gc.input_filename = ""
                 await gc.leave()
                 gc = await get_groupcall(chat_id)
                 if len(gc.playlist) != 0:
@@ -630,7 +636,7 @@ if userge.has_bot:
 async def join_voice_chat(m: Message, gc: XPlayer):
     """Join the voice chat."""
     try:
-        if gc.is_connected:
+        if gc.is_active:
             await m.edit("Already in Voice Chat !", del_in=5)
         else:
             await gc.join()
@@ -694,7 +700,11 @@ async def play_voice_chat(m: Message, gc: XPlayer):
     if (
         m.from_user
         and not (
-            m.from_user.id in Config.OWNER_ID or ((m.from_user.id in Config.SUDO_USERS) and ("playvc" in Config.ALLOWED_COMMANDS))
+            m.from_user.id in Config.OWNER_ID
+            or (
+                (m.from_user.id in Config.SUDO_USERS)
+                and ("playvc" in Config.ALLOWED_COMMANDS)
+            )
         )
         and m.chat.id not in VC_GROUP_MODE_CHATS
     ):
@@ -756,7 +766,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
         ):
             audio_msg = url_from_msg[1]
         else:
-            LOG.debug("No Valid URL found now searching for given text")
+            LOG.info("No Valid URL found now searching for given text")
             if m.input_str:
                 search_q = m.input_str
                 audio_msg = m
@@ -771,7 +781,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
                 return await m.err(f'No Result found for Query:  "{search_q}"')
             yt_id = res[0]["id"]
         if not (vid_info := await get_ytvid_info(yt_id)):
-            LOG.debug("Something Went Wrong :P")
+            LOG.info("Something Went Wrong :P")
             return
         duration = vid_info["duration"]
         audio_key = yt_id
@@ -915,7 +925,8 @@ async def change_vol(m: Message, gc: XPlayer):
         gc.set_my_volume(int(vol))
         await m.edit(f"🔈  Volume changed to  **{vol}%**")
     elif m.client.is_bot:
-        await m.reply("🎚  **Volume Pannel**", reply_markup=volume_pannel(m.chat_id))
+        text, btns = volume_pannel()
+        await m.reply(text, reply_markup=InlineKeyboardMarkup(btns))
 
 
 @userge.on_cmd(
