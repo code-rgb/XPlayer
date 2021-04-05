@@ -26,7 +26,7 @@ from functools import wraps
 from math import floor
 from random import shuffle
 from signal import SIGTERM
-from typing import Dict, List, Optional, Union, Set
+from typing import Dict, List, Optional, Set, Union
 
 import youtube_dl
 from pyrogram import filters
@@ -56,14 +56,13 @@ STREAM_LINK = re.compile(r"https?://[\S]+\.(?:m3u8?|audio|mp3|aac|[a-z]{1,4}:[0-
 FFMPEG_PROCESSES = {}
 MAX_DURATION = int(os.environ.get("VC_SONG_MAX_DURATION", 600))
 SAVED_SETTINGS = get_collection("CONFIGS")
-VC_GROUP_MODE_CHATS : Set[int] = {}
+VC_GROUP_MODE_CHATS: Set[int] = {}
 
 
 async def _init() -> None:
     global VC_GROUP_MODE_CHATS
     if gm_chats := await SAVED_SETTINGS.find_one({"_id": "VC_GROUP_MODE_CHAT"}):
-        VC_GROUP_MODE_CHATS = set(gm_chats['chat_ids'])
-
+        VC_GROUP_MODE_CHATS = set(gm_chats["chat_ids"])
 
 
 class XPlayer(GroupCall):
@@ -632,12 +631,18 @@ async def skip_song_voice_chat(m: Message, gc: XPlayer):
     check_client=True,
     allow_private=False,
     allow_bots=False,
-    check_downpath=True
+    check_downpath=True,
 )
 @add_groupcall
 async def play_voice_chat(m: Message, gc: XPlayer):
     """Play songs..."""
-    if m.from_user and not (m.from_user.id in Config.OWNER_ID or m.from_user.id in Config.SUDO_USERS) and m.chat.id not in VC_GROUP_MODE_CHATS:
+    if (
+        m.from_user
+        and not (
+            m.from_user.id in Config.OWNER_ID or m.from_user.id in Config.SUDO_USERS
+        )
+        and m.chat.id not in VC_GROUP_MODE_CHATS
+    ):
         return
     await m.edit("`Processing ...`")
     reply = m.reply_to_message
@@ -993,7 +998,10 @@ async def playlist_voice_chat(m: Message, gc: XPlayer):
 
 @userge.on_cmd(
     "vcgroupmode",
-    about={"header": "Allow all group members to use playvc even without adding then in sudo", "flags": {"-d": "disable for all chats"}},
+    about={
+        "header": "Allow all group members to use playvc even without adding then in sudo",
+        "flags": {"-d": "disable for all chats"},
+    },
     allow_channels=False,
     allow_private=False,
     allow_bots=False,
@@ -1014,7 +1022,9 @@ async def groupmode_voice_chat(m: Message):
             out = f"✅  playvc **enabled** for __Chat ID__: `{chat_id}`"
     await m.edit(out, del_in=5)
     await SAVED_SETTINGS.update_one(
-        {"_id": "VC_GROUP_MODE_CHAT"}, {"$set": {"chat_ids": list(VC_GROUP_MODE_CHATS)}}, upsert=True
+        {"_id": "VC_GROUP_MODE_CHAT"},
+        {"$set": {"chat_ids": list(VC_GROUP_MODE_CHATS)}},
+        upsert=True,
     )
 
 
