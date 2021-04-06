@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Set, Union
 
 import youtube_dl
 from pyrogram import filters
-from pyrogram.errors import UserNotParticipant, PeerIdInvalid
+from pyrogram.errors import PeerIdInvalid, UserNotParticipant
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from userge import Config, Message, get_collection, pool, userge
 from userge.plugins.bot.alive import _parse_arg
@@ -131,7 +131,9 @@ async def get_groupcall(chat_id: int) -> XPlayer:
         group_call.add_handler(playout_ended_handler, GroupCallAction.PLAYOUT_ENDED)
         if userge.has_bot:
             try:
-                await userge.get_chat_member(chat_id, (await userge.bot.get_me()).username)
+                await userge.get_chat_member(
+                    chat_id, (await userge.bot.get_me()).username
+                )
             except (UserNotParticipant, PeerIdInvalid):
                 pass
             else:
@@ -156,11 +158,10 @@ async def playout_ended_handler(gc, filename) -> None:
         await play_now(gc)
         if os.path.exists(to_del):
             os.remove(to_del)
-        return 
+        return
     if not gc.replay_songs:
         if os.path.exists(to_del):
             os.remove(to_del)
-
 
 
 def add_groupcall(func):
@@ -694,7 +695,11 @@ async def play_voice_chat(m: Message, gc: XPlayer):
     if (
         m.from_user
         and not (
-            m.from_user.id in Config.OWNER_ID or ((m.from_user.id in Config.SUDO_USERS) and ("playvc" in Config.ALLOWED_COMMANDS))
+            m.from_user.id in Config.OWNER_ID
+            or (
+                (m.from_user.id in Config.SUDO_USERS)
+                and ("playvc" in Config.ALLOWED_COMMANDS)
+            )
         )
         and m.chat.id not in VC_GROUP_MODE_CHATS
     ):
