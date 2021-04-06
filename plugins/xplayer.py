@@ -113,7 +113,6 @@ class XPlayer(GroupCall):
             await super().start(self.chat_id)
             self.is_active = True
 
-
     async def leave(self):
         self.input_filename = ""
         # https://nekobin.com/nonaconeba.py
