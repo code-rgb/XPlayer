@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Set, Union
 
 import youtube_dl
 from pyrogram import filters
-from pyrogram.errors import UserNotParticipant
+from pyrogram.errors import PeerIdInvalid, UserNotParticipant
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from userge import Config, Message, get_collection, pool, userge
 from userge.plugins.bot.alive import _parse_arg
@@ -95,7 +95,7 @@ class XPlayer(GroupCall):
             out += "`[ Empty ]`"
         else:
             current = self.playlist[0]
-            out += f"**Now Playing :  🎵 [{escape_markdown(current['title'])}]({(BASE_YT_URL + current['id']) if current['yt_url'] else current['msg'].link})**\n"
+            out += f"▶️  **Now Playing :  🎵 [{escape_markdown(current['title'])}]({(BASE_YT_URL + current['id']) if current['yt_url'] else current['msg'].link})**\n"
             if len(self.playlist) > 1:
                 out += "\n".join(
                     [
@@ -131,8 +131,10 @@ async def get_groupcall(chat_id: int) -> XPlayer:
         group_call.add_handler(playout_ended_handler, GroupCallAction.PLAYOUT_ENDED)
         if userge.has_bot:
             try:
-                await userge.get_chat_member(chat_id, (await userge.bot.get_me()).id)
-            except UserNotParticipant:
+                await userge.get_chat_member(
+                    chat_id, (await userge.bot.get_me()).username
+                )
+            except (UserNotParticipant, PeerIdInvalid):
                 pass
             else:
                 group_call.chat_has_bot = True
@@ -148,10 +150,16 @@ async def network_status_changed_handler(gc: XPlayer, is_connected: bool) -> Non
 
 async def playout_ended_handler(gc, filename) -> None:
     LOG.info(f"song ended in {gc.chat_id}")
-    if len(gc.playlist) > 1:
-        # deleting the raw file only when the next song has started
-        to_del = keypath(gc.playlist.pop(0)["id"])
+    # If replay is on then just remove the song from playlist
+    if len(gc.playlist) == 0:
+        return
+    to_del = keypath(gc.playlist.pop(0)["id"])
+    if len(gc.playlist) > 0:
         await play_now(gc)
+        if os.path.exists(to_del):
+            os.remove(to_del)
+        return
+    if not gc.replay_songs:
         if os.path.exists(to_del):
             os.remove(to_del)
 
@@ -455,7 +463,7 @@ async def append_playlist(gc: XPlayer, m: Message, media_grp: bool, **kwargs) ->
         await play_now(gc)
         await m.delete()
     elif not media_grp:
-        text = f"Added to Queue at **#{pl_length}\nSONG :** `{title}`"
+        text = f"Added to Queue at **#{pl_length - 1}\nSONG :** `{title}`"
         await m.edit((f"[\u200c]({thumb})" + text) if thumb else text)
 
 
@@ -687,7 +695,11 @@ async def play_voice_chat(m: Message, gc: XPlayer):
     if (
         m.from_user
         and not (
-            m.from_user.id in Config.OWNER_ID or m.from_user.id in Config.SUDO_USERS
+            m.from_user.id in Config.OWNER_ID
+            or (
+                (m.from_user.id in Config.SUDO_USERS)
+                and ("playvc" in Config.ALLOWED_COMMANDS)
+            )
         )
         and m.chat.id not in VC_GROUP_MODE_CHATS
     ):
@@ -741,6 +753,8 @@ async def play_voice_chat(m: Message, gc: XPlayer):
         thumb = ""
         if err_msg := check_audio(duration, audio_key, playlist):
             return await m.err(err_msg, del_in=7)
+        if len(gc.playlist) == 0:
+            await m.edit("📥  __Downloading and transcoding__ ...", del_in=5)
     else:
         if (url_from_msg := await find_url_from_msg(m, show_err=False)) and (
             yt_id := await yt_x_bleck_megik(url_from_msg[0])
@@ -770,6 +784,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
             return await m.err(err_msg, del_in=7)
         title = vid_info["title"]
         thumb = vid_info["thumb"]
+        await m.delete()
     await append_playlist(
         gc,
         m,
