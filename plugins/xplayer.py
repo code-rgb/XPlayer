@@ -485,7 +485,6 @@ if userge.has_bot:
                 await c_q.answer("Debugging ...")
                 gc.input_filename = ""
                 await gc.leave()
-                gc = await get_groupcall(chat_id)
                 if len(gc.playlist) != 0:
                     f_path = keypath(gc.playlist[0]["id"])
                     try:
@@ -493,7 +492,7 @@ if userge.has_bot:
                     except OSError:
                         pass
                     await play_now(gc)
-                return await gc.join()
+                return
             if setting == "groupm":
                 if c_q.message.chat.type == "channel":
                     out_ = "Not Permitted for Chat Type: CHANNEL"
