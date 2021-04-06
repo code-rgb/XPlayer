@@ -74,6 +74,7 @@ async def _init() -> None:
 class XPlayer(GroupCall):
     def __init__(self, chat_id: int):
         self.replay_songs = False
+        self.is_active = False
         self.current_vol = 100
         self.playlist = []
         self.chat_id = chat_id
@@ -107,14 +108,18 @@ class XPlayer(GroupCall):
 
     async def join(self):
         # Joining the same group call can crash the bot
-        if not self.is_connected:
+        # if not self.is_connected: (https://t.me/tgcallschat/7563)
+        if not self.is_active:
             await super().start(self.chat_id)
+            self.is_active = True
+
 
     async def leave(self):
         self.input_filename = ""
         # https://nekobin.com/nonaconeba.py
         try:
             await super().stop()
+            self.is_active = False
         except AttributeError:
             pass
 
@@ -143,8 +148,10 @@ async def get_groupcall(chat_id: int) -> XPlayer:
 
 async def network_status_changed_handler(gc: XPlayer, is_connected: bool) -> None:
     if is_connected:
+        self.is_active = True
         LOG.info(f"JOINED VC in {gc.chat_id}")
     else:
+        self.is_active = False
         LOG.info(f"LEFT VC in {gc.chat_id}")
 
 
@@ -483,8 +490,8 @@ if userge.has_bot:
                 return await c_q.message.delete()
             if setting == "debug":
                 await c_q.answer("Debugging ...")
-                gc.input_filename = ""
                 await gc.leave()
+                gc = await get_groupcall(chat_id)
                 if len(gc.playlist) != 0:
                     f_path = keypath(gc.playlist[0]["id"])
                     try:
@@ -492,7 +499,7 @@ if userge.has_bot:
                     except OSError:
                         pass
                     await play_now(gc)
-                return
+                return await gc.join()
             if setting == "groupm":
                 if c_q.message.chat.type == "channel":
                     out_ = "Not Permitted for Chat Type: CHANNEL"
@@ -630,7 +637,7 @@ if userge.has_bot:
 async def join_voice_chat(m: Message, gc: XPlayer):
     """Join the voice chat."""
     try:
-        if gc.is_connected:
+        if gc.is_active:
             await m.edit("Already in Voice Chat !", del_in=5)
         else:
             await gc.join()
