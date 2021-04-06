@@ -920,7 +920,8 @@ async def change_vol(m: Message, gc: XPlayer):
         gc.set_my_volume(int(vol))
         await m.edit(f"🔈  Volume changed to  **{vol}%**")
     elif m.client.is_bot:
-        await m.reply("🎚  **Volume Pannel**", reply_markup=volume_pannel(m.chat_id))
+        text, btns = volume_pannel()
+        await m.reply(text, reply_markup=InlineKeyboardMarkup(btns))
 
 
 @userge.on_cmd(
