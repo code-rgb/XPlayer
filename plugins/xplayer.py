@@ -754,7 +754,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
         if title := reply.audio.performer:
             title += f" - {reply.audio.title}"
         else:
-            title = reply.audio.title or msg.audio.file_name
+            title = reply.audio.title or reply.audio.file_name
         thumb = ""
         if err_msg := check_audio(duration, audio_key, playlist):
             return await m.err(err_msg, del_in=7)
