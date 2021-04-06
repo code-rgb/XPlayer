@@ -253,8 +253,8 @@ def convert_raw(audio_path: str, key: str = None) -> Optional[str]:
         ffmpeg.input(audio_path).output(
             raw_audio, format="s16le", acodec="pcm_s16le", ac=2, ar="48k"
         ).overwrite_output().run()
-    except ffmpeg._run.Error:
-        LOG.error("FFMPEG Error while converting to .raw")
+    except ffmpeg._run.Error as ff_e:
+        LOG.info(f"ERROR: FFMPEG coudn't transcode rawfile due to :  {ff_e}")
     else:
         os.remove(audio_path)
         return filename
@@ -287,9 +287,9 @@ def get_ytvid_info(yt_id: str) -> Optional[Dict]:
             BASE_YT_URL + yt_id, download=False
         )
     except ExtractorError:
-        LOG.error("Can't Extract Info from URL")
+        LOG.info("Can't Extract Info from URL")
     except Exception as err:
-        LOG.error(err)
+        LOG.info(err)
     else:
         return {
             "title": vid_data.get("title"),
@@ -322,15 +322,15 @@ def download_yt_song(yt_id: str) -> Optional[str]:
         with youtube_dl.YoutubeDL(opts) as ytdl:
             status = ytdl.download([BASE_YT_URL + yt_id])
     except DownloadError as dl_err:
-        LOG.error(f"Failed to download video due to ->  {dl_err}")
+        LOG.info(f"Failed to download video due to ->  {dl_err}")
     except GeoRestrictedError:
-        LOG.error("Youtube Video is Geo. Restricted")
+        LOG.info("Youtube Video is Geo. Restricted")
     except Exception as y_e:
-        LOG.error(y_e)
+        LOG.info(y_e)
     else:
         if status == 0:
             return audio_path
-        LOG.error(status)
+        LOG.info(status)
 
 
 def voice_chat_helpers_buttons():
@@ -760,7 +760,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
         ):
             audio_msg = url_from_msg[1]
         else:
-            LOG.debug("No Valid URL found now searching for given text")
+            LOG.info("No Valid URL found now searching for given text")
             if m.input_str:
                 search_q = m.input_str
                 audio_msg = m
@@ -775,7 +775,7 @@ async def play_voice_chat(m: Message, gc: XPlayer):
                 return await m.err(f'No Result found for Query:  "{search_q}"')
             yt_id = res[0]["id"]
         if not (vid_info := await get_ytvid_info(yt_id)):
-            LOG.debug("Something Went Wrong :P")
+            LOG.info("Something Went Wrong :P")
             return
         duration = vid_info["duration"]
         audio_key = yt_id
