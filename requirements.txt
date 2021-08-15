@@ -1,2 +1,2 @@
-pytgcalls
+pytgcalls==0.0.24
 ffmpeg-python
