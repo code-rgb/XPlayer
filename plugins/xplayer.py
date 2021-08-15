@@ -268,7 +268,7 @@ def convert_raw(audio_path: str, key: str = None) -> Optional[str]:
 
 def check_audio(duration: int, audio_key: str, playlist: List) -> Optional[str]:
     # Duration
-    if (invalid := (duration > MAX_DURATION or duration == 0)) :
+    if invalid := (duration > MAX_DURATION or duration == 0):
         return f"Song Duration is {'invalid' if duration == 0 else 'too long'}"
     # check if already in Playlist
     if playlist and (audio_key in [x["id"] for x in playlist]):
@@ -1027,7 +1027,7 @@ async def playlist_voice_chat(m: Message, gc: XPlayer):
     allow_bots=False,
 )
 async def groupmode_voice_chat(m: Message):
-    """ enable / disable playvc for group members """
+    """enable / disable playvc for group members"""
     await m.edit(await set_group_mode(m.chat.id, bool("-d" in m.flags)), del_in=5)
 
 
